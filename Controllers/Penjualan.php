@@ -2004,6 +2004,7 @@ class Penjualan extends BaseController
 
 				$pdf->FancyRow(array($header->nama), $fc, $border);
 				$pdf->FancyRow(array('No Pesanan : ' . $header->kodeso), $fc, $border);
+				$pdf->FancyRow(array('Tgl. Pesanan : ' . date('d M Y', strtotime($header->tglso))), $fc, $border);
 				$pdf->ln(1);
 
 				$pdf->SetWidths(array(10, 60, 10));
