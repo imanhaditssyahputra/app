@@ -197,6 +197,7 @@ if ($data != []) {
                                                 ?>
                                                         <tr>
                                                             <td>
+                                                                <input type="hidden" name="id_detail[]" value="<?= $key->id ?>">
                                                                 <select name="kode[]" id="kode<?= $no ?>" class="barang_filter_cabang form-control input-xlarge kode " onchange="showbarangname(this.value, <?= $no ?>)">
                                                                     <option value="<?= $key->kodeitem; ?>"><?= $barang->namabarang; ?></option>
                                                                 </select>
@@ -251,6 +252,7 @@ if ($data != []) {
                                                     ?>
                                                         <tr>
                                                             <td>
+                                                                <input type="hidden" name="id_detail[]" value="<?= $key->id ?>">
                                                                 <select name="kode[]" id="kode<?= $no ?>" class="barang_filter_cabang form-control input-xlarge " onchange="showbarangname(this.value, <?= $no ?>)">
                                                                     <option value="<?= $key->kodeitem; ?>"><?= $barang->namabarang; ?></option>
                                                                 </select>
@@ -297,6 +299,7 @@ if ($data != []) {
                                                 } else { ?>
                                                     <tr>
                                                         <td>
+                                                            <input type="hidden" name="id_detail[]" value="0">
                                                             <select name="kode[]" id="kode1" class="barang_filter_cabang input-xlarge kode" onchange="showbarangname(this.value, 1)">
                                                                 <option value="">--- Pilih Barang ---</option>
 
@@ -580,9 +583,14 @@ if ($data != []) {
         var td7 = x.insertCell(6);
         var td8 = x.insertCell(7);
 
-        var akun = "<select name='kode[]' id=kode" + idrowx + " onchange='showbarangname(this.value," + idrowx +
-            ")' class='barang_filter_cabang form-control input-xlarge' ><option value=''>--- Pilih Barang ---</option></select>     <input name='cn1[]'  id=a-cn" + idrowx + " onchange='totalline(" + idrowx +
-            ") value='0'  type='hidden' class='form-control rightJustified'>";
+        var akun = "<input type='hidden' name='id_detail[]' value='0'>" +
+                    "<select name='kode[]' id='kode" + idrowx +
+                    "' onchange='showbarangname(this.value," + idrowx +
+                    ")' class='barang_filter_cabang form-control input-xlarge'>" +
+                    "<option value=''>--- Pilih Barang ---</option>" +
+                    "</select>" +
+                    "<input name='cn1[]' id='a-cn" + idrowx +
+                    "' value='0' type='hidden'>";
         td1.innerHTML = akun;
         td2.innerHTML = "<input name='qty[]'  id=qty" + idrowx + " onchange='totalline(" + idrowx +
             ")' value=''  type='text' class='form-control rightJustified input-small'>    <input name='harga[]'  id=harga" + idrowx + " onchange='totalline(" + idrowx +
@@ -893,7 +901,7 @@ if ($data != []) {
 
         for (var i = 1; i < rowCount; i++) {
             var row = table.rows[i];
-            kode = row.cells[0].children[0].value;
+            kode = row.cells[0].children[1].value;
             qty = row.cells[1].children[0].value;
             x = i - 1;
             if (Status == 1) {

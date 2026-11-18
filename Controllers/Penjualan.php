@@ -22,21 +22,29 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class Penjualan extends BaseController
 {
-	public function __construct()
-	{
-		// Inisialisasi yang diperlukan
-		// Contoh: Memuat model
+	public function initController(
+		\CodeIgniter\HTTP\RequestInterface $request,
+		\CodeIgniter\HTTP\ResponseInterface $response,
+		\Psr\Log\LoggerInterface $logger
+	) {
+		parent::initController($request, $response, $logger);
+
 		$this->_CheckAksesWebsite();
 	}
 
 	private function _CheckAksesWebsite()
 	{
-		$response = service('response');
-		$model_Global =  model('Global_model', 'M_GLOBAL');
+		$model_Global = model('Global_model', 'M_GLOBAL');
 		$DataIdentity = $model_Global->_LoadProfile();
 
-		if ($DataIdentity->active_website == 1) {
-			return $response->redirect(base_url('/logout'));
+		if (!$DataIdentity) {
+			log_message('error', 'Data ms_identity tidak ditemukan atau gagal dimuat.');
+			throw new \RuntimeException('Gagal memuat konfigurasi website.');
+		}
+
+		if ((int) $DataIdentity->active_website === 1) {
+			$this->response->redirect(base_url('/logout'))->send();
+			exit;
 		}
 	}
 
@@ -142,201 +150,259 @@ class Penjualan extends BaseController
 	// 	echo $html; 
 	// }
 
+	
 	public function getMessageLog($data)
 	{
-		$model_Global =  model('Global_model', 'M_GLOBAL');
-		$session = session();
-		$level = $session->get('level');
-		$cabang = $session->get('cabang');
 		$db = db_connect();
-		
+
+		// Ambil seluruh log berdasarkan nomor bukti
 		$query = $db->table('log_detail_transaksi')
 			->where('nobukti', $data)
 			->orderBy('created_at', 'ASC')
 			->orderBy('id', 'ASC')
 			->get()
 			->getResult();
-		
-		// --- HELPER FUNCTION UNTUK PARSING STRING LOG SECARA AKURAT ---
-		$parseLogData = function($string) {
-			$fields = ['kodeitem', 'qtyorder', 'satuan', 'hargajual', 'disc'];
-			$result = [];
-			
-			$clean_str = trim($string, '[] ');
-			$pairs = explode(',', $clean_str);
-			
-			foreach ($pairs as $pair) {
-				if (strpos($pair, ':') !== false) {
-					list($key, $value) = explode(':', $pair, 2);
-					$key = preg_replace('/[^a-zA-Z0-9_]/', '', trim($key));
-					$value = trim($value, ' "'); 
-					
-					if (in_array($key, $fields)) {
-						$result[$key] = $value;
-					}
-				}
+
+		if (empty($query)) {
+			echo '<div class="text-center text-muted py-4">
+					<i class="fas fa-info-circle"></i>
+					Belum ada riwayat perubahan.
+				</div>';
+			return;
+		}
+
+		// Parsing JSON log
+		$parseLogData = function ($string) {
+			if (empty($string)) {
+				return [];
 			}
-			return $result;
+
+			$result = json_decode($string, true);
+
+			return is_array($result) ? $result : [];
 		};
-		// --------------------------------------------------------------
 
-		$history_items = [];
+		// Format tampilan angka
+		$formatAngka = function ($value) {
+			return number_format((float) ($value ?? 0), 0, ',', '.');
+		};
 
-		// === TAHAP 1: KELOMPOKKAN DATA BERDASARKAN USER, MENIT, DAN AKSI ===
+		// Ambil nama barang
+		$getNamaBarang = function ($kodeitem) use ($db) {
+			if (empty($kodeitem)) {
+				return '-';
+			}
+
+			$barang = $db->table('inv_barang')
+				->select('namabarang')
+				->where('kodeitem', $kodeitem)
+				->where('kdcbg', '01')
+				->get()
+				->getRow();
+
+			return $barang->namabarang ?? $kodeitem;
+		};
+
+		// Kelompokkan berdasarkan tanggal, menit, user, dan aksi
 		$grouped_logs = [];
+
 		foreach ($query as $value) {
-			$tipe_aksi = (stripos($value->aksi, 'INSERT') !== false) ? 'INSERT' : 'UPDATE';
-			
+
+			$aksiAsli = strtoupper($value->aksi);
+
+			if (strpos($aksiAsli, 'INSERT') !== false) {
+				$tipe_aksi = 'INSERT';
+			} elseif (strpos($aksiAsli, 'DELETE') !== false) {
+				$tipe_aksi = 'DELETE';
+			} else {
+				$tipe_aksi = 'UPDATE';
+			}
+
 			$waktu_menit = date('Y-m-d H:i', strtotime($value->created_at));
+
 			$group_key = $waktu_menit . '_' . $value->user_id . '_' . $tipe_aksi;
 
+			$data_lama = $parseLogData($value->nilai_lama);
 			$data_baru = $parseLogData($value->nilai_baru);
-			$kode_item_aktif = $data_baru['kodeitem'] ?? 'UNKNOWN';
-
-			$data_lama_asli = [];
-			$is_new_item_in_update = false; // Flag penanda jika item baru ditambahkan saat proses update
-
-			if ($tipe_aksi === 'UPDATE') {
-				if (isset($history_items[$kode_item_aktif])) {
-					$data_lama_asli = $history_items[$kode_item_aktif];
-				} else {
-					// Jika di history tidak ada, dan nilai_lama bawaan DB kosong/null/tidak valid
-					$db_lama = $parseLogData($value->nilai_lama);
-					if (empty($db_lama) || !isset($db_lama['kodeitem']) || $db_lama['kodeitem'] == '' || $db_lama['kodeitem'] == 'NULL') {
-						$is_new_item_in_update = true;
-					} else {
-						$data_lama_asli = $db_lama;
-					}
-				}
-			}
-
-			if (!empty($data_baru)) {
-				$history_items[$kode_item_aktif] = $data_baru;
-			}
 
 			if (!isset($grouped_logs[$group_key])) {
 				$grouped_logs[$group_key] = [
-					'created_at' => $value->created_at, 
-					'user_id'    => $value->user_id,
-					'aksi'       => $tipe_aksi,
-					'items'      => []
+					'jenis_transaksi'   => $value->jenis_transaksi,
+					'created_at' 		=> $value->created_at,
+					'user_id'    		=> $value->user_id,
+					'aksi'       		=> $tipe_aksi,
+					'items'      		=> []
 				];
 			}
 
 			$grouped_logs[$group_key]['items'][] = [
-				'data_lama'             => $data_lama_asli,
-				'data_baru'             => $data_baru,
-				'is_new_item_in_update' => $is_new_item_in_update,
-				'kolom'                 => $value->kolom
+				'data_lama' => $data_lama,
+				'data_baru' => $data_baru,
 			];
 		}
 
-		// === TAHAP 2: GENERATE HTML DARI DATA YANG SUDAH DIGABUNG ===
+		
 		$html = '';
-		$tanggal_terakhir = ''; 
+		$tanggal_terakhir = '';
 
 		foreach ($grouped_logs as $log) {
-			$Datauser = $db->table('userlogin')->getWhere(['uidlogin' => $log['user_id']])->getRow();
+
+			$Datauser = $db->table('userlogin')
+				->where('uidlogin', $log['user_id'])
+				->get()
+				->getRow();
+
 			$tanggal_sekarang = date('Y-m-d', strtotime($log['created_at']));
 
 			if ($tanggal_sekarang != $tanggal_terakhir) {
-				$html .= '<div class="text-center my-4 position-relative">
-							<hr class="position-absolute top-50 start-0 end-0 m-0 z-0">
-							<span class="bg-light px-3 text-secondary fw-bold small position-relative z-1">' . date('d-M-Y', strtotime($log['created_at'])) . '</span>
-						</div>';
-				$tanggal_terakhir = $tanggal_sekarang; 
+				$html .= '
+					<div class="text-center my-3">
+						<span class="badge bg-secondary">
+							' . date('d-M-Y', strtotime($log['created_at'])) . '
+						</span>
+					</div>';
+
+				$tanggal_terakhir = $tanggal_sekarang;
 			}
-					
+
+			$namaUser = $Datauser->username ?? $log['user_id'];
+			$avatar = $Datauser->avatar ?? 'foto1.jpg';
+
+			// Judul aktivitas
+			if ($log['aksi'] == 'INSERT') {
+				$judul = 'menambahkan item';
+				$warna = 'success';
+				$icon = 'fa-plus-circle';
+			} elseif ($log['aksi'] == 'DELETE') {
+				$judul = 'menghapus item';
+				$warna = 'danger';
+				$icon = 'fa-trash';
+			} else {
+				$judul = 'memperbarui item';
+				$warna = 'warning';
+				$icon = 'fa-edit';
+			}
+
 			$keterangan_detail = '';
 
-			if ($log['aksi'] === 'INSERT') {
-				$keterangan_detail = '<div class="text-success fw-bold mb-1"><i class="fas fa-plus-circle"></i> Menambahkan ' . count($log['items']) . ' data baru:</div>';
-				$keterangan_detail .= '<table class="table table-sm table-bordered text-dark bg-white shadow-sm mb-0" style="max-width: 650px; font-size: 11px;">
-										<thead class="table-light text-center">
-											<tr>
-												<th width="40%">Item</th><th width="15%">Qty</th><th width="15%">Satuan</th><th width="15%">Harga</th><th width="15%">Disc</th>
-											</tr>
-										</thead>
-										<tbody>';
-				
-				foreach ($log['items'] as $item) {
-					$data_baru = $item['data_baru'];
-					$keterangan_detail .= '<tr>
-											<td>' . ($data_baru['kodeitem'] ?? '-') . '</td>
-											<td class="text-center">' . ($data_baru['qtyorder'] ?? '0') . '</td>
-											<td class="text-center">' . ($data_baru['satuan'] ?? '-') . '</td>
-											<td class="text-end">' . number_format((float)($data_baru['hargajual'] ?? 0), 0, ',', '.') . '</td>
-											<td class="text-center">' . ($data_baru['disc'] ?? '0') . '%</td>
-										</tr>';
-				}
-				$keterangan_detail .= '</tbody></table>';
+			foreach ($log['items'] as $item) {
 
-			} else if ($log['aksi'] === 'UPDATE') {
-				$keterangan_detail = '<div class="text-warning fw-bold mb-1"><i class="fas fa-edit"></i> Mengubah / Memperbarui ' . count($log['items']) . ' data:</div>';
-				$keterangan_detail .= '<table class="table table-sm table-bordered text-dark bg-white shadow-sm mb-0" style="max-width: 650px; font-size: 11px;">
-										<thead class="table-light text-center">
-											<tr>
-												<th width="15%">Status</th><th width="35%">Item</th><th width="12%">Qty</th><th width="12%">Satuan</th><th width="13%">Harga</th><th width="13%">Disc</th>
-											</tr>
-										</thead>
-										<tbody>';
-				
-				foreach ($log['items'] as $item) {
-					$data_lama = $item['data_lama'];
-					$data_baru = $item['data_baru'];
-					
-					// JIKA ITEM INI BARU DITAMBAHKAN PADA SAAT UPDATE PESANAN
-					if ($item['is_new_item_in_update']) {
-						$keterangan_detail .= '<tr class="table-success fw-bold">
-												<td class="text-center text-success"><i class="fas fa-plus"></i> Baru</td>
-												<td>' . ($data_baru['kodeitem'] ?? '-') . '</td>
-												<td class="text-center">' . ($data_baru['qtyorder'] ?? '0') . '</td>
-												<td class="text-center">' . ($data_baru['satuan'] ?? '-') . '</td>
-												<td class="text-end">' . number_format((float)($data_baru['hargajual'] ?? 0), 0, ',', '.') . '</td>
-												<td class="text-center">' . ($data_baru['disc'] ?? '0') . '%</td>
-											</tr>';
-					} else {
-						// JIKA MEMANG ITEM LAMA YANG DI-UPDATE NILAINYA
-						$keterangan_detail .= '<tr class="table-danger text-muted text-decoration-line-through">
-												<td class="text-center">Semula</td>
-												<td>' . ($data_lama['kodeitem'] ?? '-') . '</td>
-												<td class="text-center">' . ($data_lama['qtyorder'] ?? '0') . '</td>
-												<td class="text-center">' . ($data_lama['satuan'] ?? '-') . '</td>
-												<td class="text-end">' . number_format((float)($data_lama['hargajual'] ?? 0), 0, ',', '.') . '</td>
-												<td class="text-center">' . ($data_lama['disc'] ?? '0') . '%</td>
-											</tr>';
-						$keterangan_detail .= '<tr class="table-primary fw-bold">
-												<td class="text-center">Menjadi</td>
-												<td>' . ($data_baru['kodeitem'] ?? '-') . '</td>
-												<td class="text-center">' . ($data_baru['qtyorder'] ?? '0') . '</td>
-												<td class="text-center">' . ($data_baru['satuan'] ?? '-') . '</td>
-												<td class="text-end">' . number_format((float)($data_baru['hargajual'] ?? 0), 0, ',', '.') . '</td>
-												<td class="text-center">' . ($data_baru['disc'] ?? '0') . '%</td>
-											</tr>';
+				$data_lama = $item['data_lama'];
+				$data_baru = $item['data_baru'];
+				if ($log['jenis_transaksi'] == 'SO') {
+					$qty_lama = $data_lama['qtyorder'] ?? 0;
+					$qty_baru = $data_baru['qtyorder'] ?? 0;
+				}else if ($log['jenis_transaksi'] == 'SD') {
+					$qty_lama = $data_lama['qtykirim'] ?? 0;
+					$qty_baru = $data_baru['qtykirim'] ?? 0;
+				}else if ($log['jenis_transaksi'] == 'SI') {
+					$qty_lama = $data_lama['qtysi'] ?? 0;
+					$qty_baru = $data_baru['qtysi'] ?? 0;
+				}
+
+				// INSERT
+				if ($log['aksi'] == 'INSERT') {
+
+					$kodeitem = $data_baru['kodeitem'] ?? '-';
+					$namaBarang = $getNamaBarang($kodeitem);
+
+					$keterangan_detail .= '
+						<div class="mb-2">
+							Menambahkan <strong>' . esc($namaBarang) . '</strong>
+							dengan jumlah <strong>' . esc($qty_baru) . ' ' . esc($data_baru['satuan'] ?? '') . '</strong>.
+						</div>';
+
+				// DELETE
+				} elseif ($log['aksi'] == 'DELETE') {
+
+					$kodeitem = $data_lama['kodeitem'] ?? '-';
+					$namaBarang = $getNamaBarang($kodeitem);
+
+					$keterangan_detail .= '
+						<div class="mb-2">
+							Menghapus <strong>' . esc($namaBarang) . '</strong>
+							dengan jumlah <strong>' . esc($qty_lama) . ' ' . esc($data_lama['satuan'] ?? '') . '</strong>.
+						</div>';
+
+				// UPDATE
+				} else {
+
+					$kodeLama = $data_lama['kodeitem'] ?? '-';
+					$kodeBaru = $data_baru['kodeitem'] ?? '-';
+
+					$namaLama = $getNamaBarang($kodeLama);
+					$namaBaru = $getNamaBarang($kodeBaru);
+
+					$perubahan = [];
+
+					if (($data_lama['kodeitem'] ?? '') != ($data_baru['kodeitem'] ?? '')) {
+						$perubahan[] = 'dari <strong>' . esc($namaLama) . '</strong> menjadi <strong>' . esc($namaBaru) . '</strong>';
+					}
+
+					if (($data_lama['nobatch'] ?? '') != ($data_baru['nobatch'] ?? '')) {
+						$perubahan[] = 'nobatch dari <strong>' . esc($data_lama['nobatch'] ?? '') . '</strong> menjadi <strong>' . esc($data_baru['nobatch'] ?? '') . '</strong>';
+					}
+
+					if (($qty_lama ?? '') != ($qty_baru ?? '')) {
+						$perubahan[] = 'jumlah dari <strong>' . esc($qty_lama) . '</strong> menjadi <strong>' . esc($qty_baru) . '</strong>';
+					}
+
+					if (($data_lama['satuan'] ?? '') != ($data_baru['satuan'] ?? '')) {
+						$perubahan[] = 'satuan dari <strong>' . esc($data_lama['satuan'] ?? '-') . '</strong> menjadi <strong>' . esc($data_baru['satuan'] ?? '-') . '</strong>';
+					}
+
+					if (($data_lama['hargajual'] ?? '') != ($data_baru['hargajual'] ?? '')) {
+						$perubahan[] = 'harga dari <strong>' . number_format((float)($data_lama['hargajual'] ?? 0), 0, ',', '.') . '</strong> menjadi <strong>' . number_format((float)($data_baru['hargajual'] ?? 0), 0, ',', '.') . '</strong>';
+					}
+
+					if (($data_lama['disc'] ?? '') != ($data_baru['disc'] ?? '')) {
+						$perubahan[] = 'diskon dari <strong>' . esc($data_lama['disc'] ?? 0) . '%</strong> menjadi <strong>' . esc($data_baru['disc'] ?? 0) . '%</strong>';
+					}
+
+					if (!empty($perubahan)) {
+						$keterangan_detail .= '
+							<div class="mb-2">
+								Memperbarui <strong>' . esc($namaBaru) . '</strong>:
+								<ul class="mb-1 ps-4">
+									<li>' . implode('</li><li>', $perubahan) . '</li>
+								</ul>
+							</div>';
 					}
 				}
-				$keterangan_detail .= '</tbody></table>';
 			}
 
-			$html .= '<div class="d-flex align-items-start mb-4 text-start">
-						<div class="bg-success text-white rounded-circle d-flex align-items-center justify-content-center fw-bold me-3 shadow-sm" style="width: 38px; height: 38px; flex-shrink: 0;"> 
-							<img class="rounded-circle header-profile-user" src="' . BASEURL . 'assets/puser/' . ($Datauser->avatar ?? 'default.png') . '" alt="Header Avatar"> 
+			$html .= '
+				<div class="d-flex align-items-start mb-3">
+
+					<div class="bg-success text-white rounded-circle d-flex align-items-center justify-content-center fw-bold me-3 shadow-sm" style="width: 38px; height: 38px; flex-shrink: 0;"> 
+						<img class="rounded-circle header-profile-user" src="' . BASEURL . 'assets/puser/' . $Datauser->avatar . '" alt="Header Avatar"> 
+					</div>
+
+					<div class="w-100">
+
+						<div class="small">
+							<strong class="text-dark">' . esc($namaUser) . '</strong>
+							<span class="text-muted ms-1">
+								' . date('H:i:s', strtotime($log['created_at'])) . '
+							</span>
 						</div>
 
-						<div class="w-100">
-							<div class="small">
-								<span class="fw-bold text-dark">' . ($log['user_id'] ?? 'Unknown') . '</span>
-								<span class="text-muted ms-1">' . date('d-M-Y H:i:s', strtotime($log['created_at'])) . '</span>
-							</div>
-							<div class="text-secondary small mt-1">
-								' . $keterangan_detail . '
-							</div>
+						<div class="small text-' . $warna . ' fw-bold mt-1">
+							<i class="fas ' . $icon . '"></i>
+							' . ucfirst($judul) . '
 						</div>
-										</div>';
+
+						<div class="small text-dark mt-2">
+							' . $keterangan_detail . '
+						</div>
+
+					</div>
+				</div>';
 		}
-		echo $html;
-	}
 
+		echo $html;
+
+	}
 
 	//Data Customer Page Start Here
 	public function data_customer()
@@ -1113,9 +1179,8 @@ class Penjualan extends BaseController
 
 
 						if ($param != 0) {
+							$DataDetail = $builderDetail->getWhere(['kodeso' => $input['nomorbukti'], 'cabang' => $session->get('cabang')])->getResult();
 							if ($DataSoFile->statusid == 3) {
-
-								$DataDetail = $builderDetail->getWhere(['kodeso' => $input['nomorbukti'], 'cabang' => $session->get('cabang')])->getResult();
 								$cekkode = $input['kode'];
 								if ($cekkode == null) {
 									$stskode = array('KB.000000');
@@ -1220,12 +1285,14 @@ class Penjualan extends BaseController
 									}
 								}
 							} else {
+
 								$builderDetail->delete(['kodeso' => $input['nomorbukti'], 'cabang' => $session->get('cabang')]);
 								$builderDetailPofile->delete(['kodepo' => $input['NoPOBeli']]);
 							}
 						}
 
 						if ($param >= 0) {
+							$id_detail  = $input['id_detail'];
 							$kode  = $input['kode'];
 							$qty   = $input['qty'];
 							$sat   = $input['sat'];
@@ -1233,6 +1300,85 @@ class Penjualan extends BaseController
 							$disc  = $input['disc'];
 
 							$jumdata  = count($kode);
+							
+							$kolom_pantau = ['kodeitem', 'qtyorder', 'satuan'];
+
+							// AUDIT KHUSUS EDIT SO DENGAN STATUS SELAIN 3
+							if ($param != 0 && $DataSoFile->statusid != 3) {
+
+								// Ubah ID detail dari form menjadi integer
+								$submittedIds = array_map('intval', $id_detail);
+
+								// A. CEK DETAIL LAMA: UPDATE ATAU DELETE
+								foreach ($DataDetail as $oldData) {
+
+									$OldDataArray = [
+										'kodeitem' => $oldData->kodeitem,
+										'qtyorder' => $oldData->qtyorder,
+										'satuan'   => $oldData->satuan,
+									];
+
+									// Cari posisi ID detail lama di data form
+									$index = array_search(
+										(int) $oldData->id,
+										$submittedIds,
+										true
+									);
+
+									if ($index === false || empty($kode[$index])) {
+
+										// ID lama tidak ditemukan di form = DELETE
+										audit_log_detail(
+											$input['nomorbukti'],
+											'SO',
+											$kolom_pantau,
+											$OldDataArray,
+											null
+										);
+
+									} else {
+
+										// ID lama ditemukan = cek perubahan data
+										$NewDataArray = [
+											'kodeitem' => $kode[$index],
+											'qtyorder' => $qty[$index],
+											'satuan'   => $sat[$index],
+										];
+
+										audit_log_detail(
+											$input['nomorbukti'],
+											'SO',
+											$kolom_pantau,
+											$OldDataArray,
+											$NewDataArray
+										);
+									}
+								}
+
+								// B. CEK DETAIL BARU YANG DITAMBAHKAN
+								for ($i = 0; $i < $jumdata; $i++) {
+
+									if (
+										!empty($kode[$i]) &&
+										(int) ($id_detail[$i] ?? 0) == 0
+									) {
+
+										$NewDataArray = [
+											'kodeitem' => $kode[$i],
+											'qtyorder' => $qty[$i],
+											'satuan'   => $sat[$i],
+										];
+
+										audit_log_detail(
+											$input['nomorbukti'],
+											'SO',
+											$kolom_pantau,
+											null,
+											$NewDataArray
+										);
+									}
+								}
+							}
 
 							$tot = 0;
 							$tdisc = 0;
@@ -1296,11 +1442,12 @@ class Penjualan extends BaseController
 											$datad['kodeso'] = $input['nomorbukti'];
 											$builderDetail->insert($datad);
 											$insertId = $builderDetail->db()->insertID();
-											$oldData = $builderDetail->getWhere(['kodeso' => $input['nomorbukti'], 'cabang' => $session->get('cabang')])->getRowArray();
-											audit_log_detail($input['nomorbukti'], 'SO', $kolom_pantau, $oldData, $datad);
+											
 										}
 									}
 								}
+
+								
 
 								$DataBarangPaket = $buildInvBarangPaket->getWhere(['kodeitem_barang' => $kode[$i]])->getRow();
 								if (!empty($DataBarangPaket)) {
@@ -3611,6 +3758,7 @@ class Penjualan extends BaseController
 					public function pesanandisiapkansave()
 					{
 						error_reporting(0);
+						helper('log_transaksi'); 
 						$model_Global =  model('Global_model', 'M_GLOBAL');
 						$db = db_connect();
 						$input = $this->request->getPost();
@@ -3656,6 +3804,8 @@ class Penjualan extends BaseController
 									$buildKirimPaket->delete(['kodekirim' => $input['nomorbukti'], 'gudang' => $input['gudang'], 'cabang' => $sescabang]);
 								}
 
+								
+								$id_detail  = $input['id_detail'];
 								$kode  		= $input['kode'];
 								$idkode  	= $input['idkode'];
 								$no_batch  	= $input['no_batch'];
@@ -3664,6 +3814,88 @@ class Penjualan extends BaseController
 								$sat   		= $input['sat'];
 
 								$jumdata  = count($kode);
+								
+
+								$kolom_pantau = ['kodeitem' , 'qtykirim', 'satuan', 'nobatch'];
+								// AUDIT KHUSUS EDIT SD
+								if ($param != 0) {
+
+									// Ubah ID detail dari form menjadi integer
+									$submittedIds = array_map('intval', $id_detail);
+
+									// A. CEK DETAIL LAMA: UPDATE ATAU DELETE
+									foreach ($datalpb as $oldData) {
+
+										$OldDataArray = [
+											'kodeitem' => $oldData->kodeitem,
+											'qtykirim' => $oldData->qtykirim,
+											'satuan'   => $oldData->satuan,
+											'nobatch'  => $oldData->no_batch,
+										];
+
+										// Cari posisi ID detail lama di data form
+										$index = array_search(
+											(int) $oldData->id,
+											$submittedIds,
+											true
+										);
+
+										if ($index === false || empty($kode[$index])) {
+
+											// ID lama tidak ditemukan di form = DELETE
+											audit_log_detail(
+												$input['nomorbukti'],
+												'SD',
+												$kolom_pantau,
+												$OldDataArray,
+												null
+											);
+
+										} else {
+
+											// ID lama ditemukan = cek perubahan data
+											$NewDataArray = [
+												'kodeitem' => $kode[$index],
+												'qtykirim' => $qty[$index],
+												'satuan'   => $sat[$index],
+												'nobatch'  => $no_batch[$index],
+											];
+
+											audit_log_detail(
+												$input['nomorbukti'],
+												'SD',
+												$kolom_pantau,
+												$OldDataArray,
+												$NewDataArray
+											);
+										}
+									}
+
+									// B. CEK DETAIL BARU YANG DITAMBAHKAN
+									for ($i = 0; $i < $jumdata; $i++) {
+
+										if (
+											!empty($kode[$i]) &&
+											(int) ($id_detail[$i] ?? 0) == 0
+										) {
+
+											$NewDataArray = [
+												'kodeitem' => $kode[$i],
+												'qtykirim' => $qty[$i],
+												'satuan'   => $sat[$i],
+												'nobatch'  => $no_batch[$i],
+											];
+
+											audit_log_detail(
+												$input['nomorbukti'],
+												'SD',
+												$kolom_pantau,
+												null,
+												$NewDataArray
+											);
+										}
+									}
+								}
 
 								for ($i = 0; $i < $jumdata; $i++) {
 									$datad = array(
@@ -3678,10 +3910,13 @@ class Penjualan extends BaseController
 										'sodetail_id' => $idkode[$i],
 									);
 
+									$kolom_pantau = ['kodeitem' , 'qtykirim', 'satuan', 'nobatch'];
+
 									if ($kode[$i] != "") {
 										if ($param == 0) {
 											$datad['kodekirim'] = $nobukti;
 											$builderDetail->insert($datad);
+											audit_log_detail($nobukti, 'SD', $kolom_pantau, null, $datad);
 										} else {
 											$datad['kodekirim'] = $input['nomorbukti'];
 											$builderDetail->insert($datad);
@@ -4180,6 +4415,7 @@ class Penjualan extends BaseController
 					public function fakturpenjualansave()
 					{
 						error_reporting(0);
+						helper('log_transaksi'); 
 						$model_Global =  model('Global_model', 'M_GLOBAL');
 						$taxes = $model_Global->_LoadProfile()->taxes_desimal;
 						$db = db_connect();
@@ -4339,6 +4575,8 @@ class Penjualan extends BaseController
 												'cabang' => $cabang,
 											);
 
+											
+											$kolom_pantau = ['kodeitem' , 'qtysi', 'satuan', 'nobatch', 'hargajual', 'disc'];
 											if ($_kode != "") {
 												if ($param == 0) {
 													$datad['kodesi'] = $nobukti;
@@ -4347,6 +4585,7 @@ class Penjualan extends BaseController
 
 													$data_inv['nobukti_id'] = $insertId;
 													$INVtransaksi->insert($data_inv);
+													audit_log_detail($nobukti, 'SI', $kolom_pantau, null, $datad);
 												}
 												$db->query("UPDATE inv_nobatch set qty_saldo = qty_saldo - '$qty[$i]', qty_jual = qty_jual + '$qty[$i]' 
 															where kodeitem = '$kode[$i]' and no_batch='$no_batch[$i]' and gudang = '$kodegudang' and cabang = '$cabang'");

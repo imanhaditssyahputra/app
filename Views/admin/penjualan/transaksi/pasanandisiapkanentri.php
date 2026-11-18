@@ -157,6 +157,7 @@ if ($data != []) {
                                                                         <option value="<?= $key->kodeitem; ?>"><?= $barang->namabarang; ?></option>
                                                                     </select>
                                                                     <input name="idkode[]" value="<?= $Arsodetail->id; ?>" id="idkode<?= $no ?>" type="hidden" class="form-control rightJustified">
+                                                                    <input type="hidden" name="id_detail[]" value="<?= $key->id ?>">
                                                                 </td>
                                                                 <td>
                                                                     <input name="no_batch[]" readonly="" value="<?= $key->no_batch; ?>" id="no_batch<?= $no ?>" type="text" class="form-control input-small rightJustified">
@@ -201,6 +202,7 @@ if ($data != []) {
                                                                     <option> ---- Pilih Barang---- </option>
                                                                 </select>
                                                                 <input name="idkode[]" value="" id="idkode1" type="hidden" class="form-control rightJustified">
+                                                                <input type="hidden" name="id_detail[]" value="0">
                                                             </td>
                                                             <td>
                                                                 <input name="no_batch[]" readonly="" value="" id="no_batch1" type="text" class="form-control rightJustified input-small">
@@ -417,26 +419,6 @@ if ($data != []) {
     </div>
 </div>
 
-<!-- Modal View Detail Barang Paket -->
-<!-- <div class="modal fade" id="ShowPaketBatch" tabindex="-1" role="dialog" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <span id="nopilihbarangbatchpaket">
-                <div class="modal-header">
-                    <h4 class="modal-title">Nobatch Barang Paket</h4>
-                    <h5><strong><span id="namabarangbatchpaket"></span></strong></h5>
-                </div>
-                <div class="modal-body">
-                    <div id="daftarbarangpaketBatch">
-
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary waves-effect" data-bs-dismiss="modal" aria-label="Close">Close</button>
-                </div>
-        </div>
-    </div>
-</div> -->
 <script>
     var cbg = '<?= $cabang ?>';
     var idrow = 2;
@@ -457,32 +439,25 @@ if ($data != []) {
         var td9 = x.insertCell(8);
 
         var akun = "<select name='kode[]' id=kode" + idrowx + " onchange='showbarangname(this.value," + idrowx +
-            ")' class='barang_filter_cabang form-control input-xlarge' ><option value=''>--- Pilih Barang ---</option></select> <input name='idkode[]'    id=idkode" +
-            idrowx + "  value=''  type='hidden' class='form-control rightJustified'  >";
+            ")' class='barang_filter_cabang form-control input-xlarge' ><option value=''>--- Pilih Barang ---</option></select>" +
+            " <input name='idkode[]'    id=idkode" + idrowx + "  value=''  type='hidden' class='form-control rightJustified'>" +
+            " <input type='hidden' name='id_detail[]' value='0'>";
         td1.innerHTML = akun;
-        td2.innerHTML = "<input name='no_batch[]'  readonly  value='' id=no_batch" + idrowx +
-            " type='text' class='form-control rightJustified input-small '>";
-        td3.innerHTML = "<a class='btn default' id=lupharga" + idrowx +
-            " data-toggle='modal' onclick='getbatch(this.id)'><i class='fa fa-search'></i></a>";
-        td4.innerHTML = "<input name='tgl_exp[]'    id=tgl_exp" + idrowx +
-            " value=''  type='text' readonly class='form-control rightJustified input-small'>";
+        td2.innerHTML = "<input name='no_batch[]'  readonly  value='' id=no_batch"+ idrowx +" type='text' class='form-control rightJustified input-small'>";
+        td3.innerHTML = "<a class='btn default' id=lupharga"+ idrowx +" data-toggle='modal' onclick='getbatch(this.id)'><i class='fa fa-search'></i></a>";
+        td4.innerHTML = "<input name='tgl_exp[]'    id=tgl_exp" + idrowx + " value=''  type='text' readonly class='form-control rightJustified input-small'>";
         td5.innerHTML = "<input name='qty[]'  onchange='check_qty(this.value," + idrowx + ")'  id=qty" + idrowx +
-            " oninput='totalline(" + idrowx +
-            ")' value='0'  type='text' class='form-control rightJustified input-xsmall'  > <input name='qty_jual[]'    id=qty_jual" +
-            idrowx +
-            "  value='1'  type='hidden' class='form-control rightJustified'  > <input name='qtypesan[]'    id=qtypesan" +
-            idrowx + "  value='1'  type='hidden' class='form-control rightJustified'  >";
+            " oninput='totalline(" + idrowx + ")' value='0'  type='text' class='form-control rightJustified input-xsmall'>" +
+            " <input name='qty_jual[]'    id=qty_jual" + idrowx + " value='1'  type='hidden' class='form-control rightJustified'>" +
+            " <input name='qtypesan[]'    id=qtypesan" +idrowx + "  value='1'  type='hidden' class='form-control rightJustified'>";
         td6.innerHTML = "<input name='stock[]'  readonly  id=stock" + idrowx + " oninput='totalline(" + idrowx +
-            ")' value='0'  type='text' class='form-control rightJustified input-xsmall'  > <input name='qtysisapesan[]'    id=qtysisapesan" +
-            idrowx + "  value='1'  type='hidden' class='form-control rightJustified'  > ";
+            ")' value='0'  type='text' class='form-control rightJustified input-xsmall'>" +
+            " <input name='qtysisapesan[]'    id=qtysisapesan" + idrowx + "  value='1'  type='hidden' class='form-control rightJustified'>";
         td7.innerHTML = "<input name='sat[]'    id=sat" + idrowx + " type='text' class='form-control input-xsmall' >";
-        td8.innerHTML = "<a class='btn default' id=ViewDetailPaket" + idrowx +
-            " data-toggle='modal' onclick='getPaket(this.id)'><i class='fa fa-search'></i></a> <input name='ifViewDetailPaket[]'    id=ifViewDetailPaket" +
-            idrowx + "  value='0'  type='hidden' class='form-control rightJustified'  >";
+        td8.innerHTML = "<a class='btn default' id=ViewDetailPaket" + idrowx +" data-toggle='modal' onclick='getPaket(this.id)'><i class='fa fa-search'></i></a>"+
+            " <input name='ifViewDetailPaket[]'    id=ifViewDetailPaket" +idrowx + "  value='0'  type='hidden' class='form-control rightJustified'  >";
         td9.innerHTML =
             "<button type='button' onclick='deleteRow(this)' class='btn red'><i class='fa fa-trash'></i></button>";
-
-
         idrow++;
         initailizeSelect2_barang_filterCabang(cbg);
     }

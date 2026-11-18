@@ -11,8 +11,15 @@ class Global_model extends Model
 	public function _LoadProfile()
 	{
 		$db = db_connect();
-		$query = $db->table('ms_identity')->get()->getRow();
-		return $query;
+
+		$query = $db->table('ms_identity')->get();
+
+		if ($query === false) {
+			log_message('error', 'Gagal mengambil data ms_identity: ' . json_encode($db->error()));
+			return null;
+		}
+
+		return $query->getRow();
 	}
 
 	//Akses Menu Page Start Here

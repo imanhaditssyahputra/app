@@ -454,7 +454,7 @@ $data  = [
                                         $kodeakun = $db->table("ms_akun")->getWhere(['akuninduk !=' => '', 'kelompok' => 'BANK'])->getResult();
                                         if ($session->get('level') == 5) {
                                             foreach ($kodeakun as $row) {
-                                                if ($row->kodeakun == '110101' || $row->kodeakun == '110104' || $row->kodeakun == '110103') {
+                                                if ($row->kodeakun == '110101' || $row->kodeakun == '110104' || $row->kodeakun == '110103' || $row->kodeakun == '110102') {
                                         ?>
                                                     <option value="<?php echo $row->kodeakun; ?>"><?php echo $row->kodeakun . ' - ' . $row->namaakun; ?></option>
                                                 <?php } ?>

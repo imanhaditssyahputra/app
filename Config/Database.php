@@ -80,9 +80,10 @@ class Database extends Config
         if (ENVIRONMENT === 'testing') {
             $this->defaultGroup = 'tests';
         }
-        $this->default['hostname'] = getenv('DB_HOST');
-        $this->default['database'] = getenv('DB_DATABASE');
-        $this->default['username'] = getenv('DB_USERNAME');
-        $this->default['password'] = getenv('DB_PASSWORD');
+        $this->default['hostname'] = env('DB_HOST', '127.0.0.1');
+        $this->default['database'] = env('DB_DATABASE', 'ajfcorp');
+        $this->default['username'] = env('DB_USERNAME', 'root');
+        $this->default['password'] = env('DB_PASSWORD', '');
+        $this->default['port'] = 3306;
     }
 }

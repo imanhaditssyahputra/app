@@ -14,21 +14,30 @@ class Auth extends BaseController
 {
     public function index()
     {
-		$model_Global =  model('Global_model', 'M_GLOBAL');
+        $model_Global = model('Global_model', 'M_GLOBAL');
         $DataIdentity = $model_Global->_LoadProfile();
+
         if (!empty(session()->get('username'))) {
             return $this->response->redirect(base_url('/dashboard'));
-        } else {
-			($DataIdentity->active_website == 1) ? $viewlink = 'errors/html/maintenance' : $viewlink = 'admin/login';
-            $css = [];
-            $js = [];
-            $data  = [
-                'css' => $css,
-                'js' => $js,
-                'title' => 'AJF-Corp',
-            ];
-            return view($viewlink, $data);
         }
+
+        // Cek apakah data identity tersedia
+        $activeWebsite = $DataIdentity->active_website ?? 0;
+
+        $viewlink = ($activeWebsite == 1)
+            ? 'errors/html/maintenance'
+            : 'admin/login';
+
+        $css = [];
+        $js = [];
+
+        $data = [
+            'css' => $css,
+            'js' => $js,
+            'title' => 'AJF-Corp',
+        ];
+
+        return view($viewlink, $data);
     }
 
     public function login_check()
